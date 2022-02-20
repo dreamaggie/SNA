@@ -1,0 +1,312 @@
+---
+title: "Social Network Empirical Exercise #2"
+author: "Maggie Meng"
+date: "2021/11/2"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(igraph)
+library(data.table)
+library(reshape2)
+library(readxl)
+```
+
+
+```{r}
+data1 = fread("Funding_events_7.14.csv", header = TRUE)
+data2 = read_excel("Funding_events_7.14_page2.xlsx")
+outcome = fread("Venture_capital_firm_outcomes.csv", header = TRUE)
+```
+
+```{r}
+library(lubridate)
+data1$`Deal Date`<- as.Date(parse_date_time(data1$`Deal Date`,"mdy"))
+```
+
+
+```{r}
+#sapply(data1, class)
+#sapply(data2, class)
+data2$`Deal Date` <- as.Date(data2$`Deal Date`, format = "%Y-%m-%d")
+funding_events <- rbind(data1, data2)
+max(funding_events$`Deal Date`) #"2014-07-08"
+```
+
+```{r}
+#check NA values
+na_count <-sapply(funding_events, function(y) sum(length(which(is.na(y)))))
+data.frame(na_count)
+```
+
+## Question 1 
+```{r}
+library(data.table)
+library(splitstackshape)
+
+funding_events_test = funding_events
+
+funding_events_test = funding_events[complete.cases(funding_events$Investors), ]
+q1 = funding_events_test[,c('Investors','Deal Date')]
+#delete all ', Inc.'
+q1[] <- lapply(q1, gsub, pattern=', Inc.', replacement='')
+
+investors = data.table(q1)
+colnames(investors) = c("Investors", "Deal Date")
+investors = cSplit(investors, "Investors", ",", type.convert = FALSE)
+investors = investors[-which(is.na(investors$Investors_02)), ]
+```
+
+```{r}
+investors2 = investors
+colnames(investors2)[1] <- "date1"
+for (i in 2:26){
+  num <- paste("date", i, sep = "")
+  investors2[[num]]=investors2$date1
+}
+
+investors2[is.na(investors2)] <- 0
+```
+
+
+```{r}
+library(tidyr)
+investors2 = unite(investors2, "col1", Investors_01,date1, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col2", Investors_02,date2, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col3", Investors_03,date3, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col4", Investors_04,date4, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col5", Investors_05,date5, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col6", Investors_06,date6, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col7", Investors_07,date7, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col8", Investors_08,date8, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col9", Investors_09,date9, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col10", Investors_10,date10, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col11", Investors_11,date11, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col12", Investors_12,date12, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col13", Investors_13,date13, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col14", Investors_14,date14, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col15", Investors_15,date15, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col16", Investors_16,date16, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col17", Investors_17,date17, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col18", Investors_18,date18, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col19", Investors_19,date19, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col20", Investors_20,date20, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col21", Investors_21,date21, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col22", Investors_22,date22, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col23", Investors_23,date23, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col24", Investors_24,date24, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col25", Investors_25,date25, sep = ", ", na.rm = TRUE, remove = TRUE)
+investors2 = unite(investors2, "col26", Investors_26,date26, sep = ", ", na.rm = TRUE, remove = TRUE)
+```
+
+```{r}
+for (i in 3:26){
+  num <- paste("col", i, sep = "")
+  is.na(investors2[[num]]) <- startsWith(investors2[[num]], "0, ")
+}
+```
+
+
+```{r}
+func <- function(x){
+  t = as.character(x[!is.na(x)])
+  t1 = combn(t,2)
+} 
+  
+l = apply(investors2, 1, func)
+l1 <- as.data.frame(l)
+colnames(l1) = NULL
+l2= data.frame(t(l1))
+```
+
+```{r}
+l2 = separate(l2, X1, c("Investor1", "Date"), sep = ",")
+l2 = separate(l2, X2, c("Investor2", "Date2"), sep = ",")
+q1_network = l2[,c("Date","Investor1","Investor2")]
+q1_network$Date = as.Date(q1_network$Date)
+q1_network = unique(q1_network)
+```
+
+```{r}
+q1_network_asc = q1_network[order(q1_network$Investor1,q1_network$Investor2,q1_network$Date),]
+
+f=factor(q1_network$Date)
+levels(f) = rev(levels(f))
+q1_network_desc = q1_network[order(q1_network$Investor1,q1_network$Investor2,as.Date(f)),]
+```
+
+```{r}
+library(dplyr)
+renewal <- q1_network %>%
+  arrange(Investor1, Investor2, Date) %>%
+  group_by(Investor1, Investor2) %>%
+  mutate(diff = as.integer(Date - lag(Date)))
+
+quantile(renewal$diff, probs = 0.90, na.rm = TRUE) #1149,1174
+```
+
+```{r}
+q1_network_desc = q1_network_desc[!duplicated(q1_network_desc[2:3]),]
+q1_network_desc$diff <- as.integer(difftime("2014-07-08", q1_network_desc$Date, units = "days"))
+network_final <- q1_network_desc %>% filter(diff<1174)
+```
+
+```{r}
+q1_network_final = network_final[,c(2:3)]
+
+q1_network_final = graph.data.frame(q1_network_final, directed = FALSE)
+
+q1_clossness = closeness(q1_network_final,mode="all",weights = NULL,normalized = FALSE)
+df.clossness = data.frame(q1_clossness)
+
+max(q1_clossness) #2M Companies
+```
+Kleiner Perkins Caufield & Byers has the highest closeness centrality of 3.422849e-07, which means KPCB is the center of the venture capital firm network as of July 2014.
+
+
+## Question 2
+```{r}
+q2_network = network_final
+
+elapsed_months <- function(end_date, start_date) {
+    ed <- as.POSIXlt(end_date)
+    sd <- as.POSIXlt(start_date)
+    12 * (ed$year - sd$year) + (ed$mon - sd$mon)
+}
+q2_network$diff_month <- as.integer(elapsed_months("2014-07-08", q2_network$Date))
+q2_network$diff_month = -q2_network$diff_month
+```
+
+```{r}
+result <- data.frame(matrix(nrow = 40, ncol = 2))
+colnames(result) <- c("Months", "Average Coreness")
+for (i in -39:0){
+  network = q2_network[q2_network[,5] <= i, 2:3]
+  mean_coreness = mean(coreness(graph.data.frame(network)))
+  result[i+40, 1] <- i+40
+  result[i+40, 2] <- mean_coreness
+}
+result
+```
+
+```{r}
+library(ggplot2)
+ggplot(data=result, aes(x=Months, y=`Average Coreness`, group=1)) +
+  geom_line() +
+  labs(title="Plot of average k-core overtime")
+```
+
+```{r}
+mean(coreness(q1_network_final),model="all")
+```
+
+## Question 3
+### A)
+```{r}
+#gsize(q1_network_final) #44978
+length(V(q1_network_final)) #7037
+
+#par(mfrow=c())
+
+for (i in -39:0){
+  network = graph.data.frame(q2_network[q2_network[,5] <= i, 2:3])
+  
+  q3_result <- data.frame(matrix(nrow = length(V(network))-1, ncol = 2))
+  colnames(q3_result) <- c("Number of Nodes", "Concentration Score")
+  
+  for (i in 1:(length(V(network))-1)) {
+    ideal_score = c(rep(1,i),rep(0,(length(V(network))-i)))
+    eigen_centraliyty = centr_eigen(network, directed = FALSE)$vector
+    sorted_eigen_centraliyty = sort(eigen_centraliyty, decreasing = TRUE)
+    concentration = abs(cor(ideal_score, sorted_eigen_centraliyty))
+    q3_result[i, 1] <- i
+    q3_result[i, 2] <- concentration
+  }
+  
+  df2[which.max(df2$cor_core),"nodes"]
+  plot = ggplot(data=q3_result, aes(x=`Number of Nodes`, y=`Concentration Score`)) +
+    geom_line()
+  print(plot)
+}
+
+```
+Since the connection scores are close to 1, the network fits the structure of the perfectly-segragated blockmodel.
+
+
+### B)
+```{r}
+q3_result_B <- data.frame(matrix(nrow = 40, ncol = 2))
+colnames(q3_result_B) <- c("Nodes Core", "Time")
+
+for (i in -39:0){
+  network = graph.data.frame(q2_network[q2_network[,5] <= i, 2:3])
+  
+  
+  result2 <- data.frame(matrix(nrow = length(V(network))-1, ncol = 2))
+  colnames(result2) <- c("Number of Nodes", "Concentration Score")
+  
+  for (j in 1:(length(V(network))-1)) {
+    ideal_score = c(rep(1,j),rep(0,(length(V(network))-j)))
+    eigen_centraliyty = centr_eigen(network, directed = FALSE)$vector
+    sorted_eigen_centraliyty = sort(eigen_centraliyty, decreasing = TRUE)
+    concentration = abs(cor(ideal_score, sorted_eigen_centraliyty))
+    result2[j, 1] <- j
+    result2[j, 2] <- concentration
+  }
+  
+  nodes = result2[which.max(result2$`Concentration Score`),"Number of Nodes"]
+  q3_result_B[i+40, 1] <- nodes
+  q3_result_B[i+40, 2] <- i+40
+}
+
+
+ggplot(data=q3_result_B, aes(x=`Time`, y=`Nodes Core`)) +
+  geom_point() +
+  labs(title="Plot of nodes core overtime")
+```
+
+
+## Question 4
+```{r}
+library(cluster)
+q4_network = q1_network_asc[!duplicated(q1_network_asc[2:3]),]
+q4_network <- q4_network %>% filter(Date<"1996-07-01")
+q4_network = q4_network[,2:3]
+```
+
+```{r}
+g <- graph_from_data_frame(q4_network)
+q4_network_matrix <- as_adjacency_matrix(g)
+
+q4_network_matrix2 = as.matrix(q4_network_matrix)
+q4_dist <- dist(q4_network_matrix2)
+
+#q4_dist = cmdscale(q4_dist,k=2)
+```
+
+```{r}
+library(purrr)
+sil_width <- map_dbl(2:15,  function(k){
+  model <- pam(q4_dist, k = k)
+  model$silinfo$avg.width
+})
+
+sil_df <- data.frame(
+  k = 2:15,
+  sil_width = sil_width
+)
+
+sil_df[which.max(sil_df$sil_width),"k"]
+max(sil_df$sil_width)
+```
+The the recommended number of clusters would be 7.
+
+```{r}
+q4_pam <- pam(q4_dist, k=7, stand = FALSE)
+clusplot(q4_pam)
+```
+Since the largest average silhouette width is 0.329, there's no clustering solution suitable under the rule of thumb. Therefore, it indicates that the core-periphery approach is preferred than the clustering approach in venture capital data set.

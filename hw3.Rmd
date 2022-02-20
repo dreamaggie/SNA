@@ -1,0 +1,647 @@
+---
+title: "hw3"
+author: "Maggie Meng"
+date: "2021/11/8"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(igraph)
+library(data.table)
+library(reshape2)
+library(PearsonDS)
+library(dplyr)
+border_information = fread("border_information.csv", header = TRUE)
+election_results = fread("election_results.csv", header = TRUE)
+monthly_rainfall = fread("monthly_rainfall.csv", header = TRUE)
+```
+
+
+## Question 1
+```{r}
+#only keep integer year
+monthly_rainfall$year = floor(monthly_rainfall$time)
+
+#sum rainfall by district and year
+rainfall_data <- aggregate(monthly_rainfall[, 4],
+                           list(monthly_rainfall$district,monthly_rainfall$year), sum)
+colnames(rainfall_data)[1] <- "district"
+colnames(rainfall_data)[2] <- "year"
+colnames(rainfall_data)[3] <- "rainfall"
+#rainfall_data
+
+#mean rainfall and sd rainfall
+pearson <- rainfall_data %>%
+  group_by(district) %>%
+  mutate(mean=mean(rainfall)) %>%
+  mutate(sd=sd(rainfall))
+
+#get pnorm() of rainfall
+pearson <- pearson %>% 
+  mutate(p = pnorm(rainfall, mean = mean, sd = sd))
+
+# pearson2 <- pearson %>%
+#   group_by(district) %>%
+#   mutate(x_mean=mean(p)) %>%
+#   mutate(s=var(p))
+
+#scale and shape
+pearson2 <- pearson %>% 
+  mutate(scale = sd^2/mean) %>%
+  mutate(shape = (mean^2)/sd^2)
+
+#run pearson function
+pearson2$pearson <- qpearsonIII(pearson2$p, scale = pearson2$scale, shape = pearson2$shape, location = 0)
+
+#calculate pearson mean and sd
+spi <- pearson2 %>%
+  group_by(district) %>%
+  mutate(pearson_mean=mean(pearson)) %>%
+  mutate(pearson_sd=sd(pearson))
+
+#calculate spi
+spi$spi <- (spi$pearson-spi$pearson_mean) / spi$pearson_sd
+
+#rearrange data frame
+spi_final <- spi[,c(1,2,12)]
+```
+
+```{r}
+#rearrange data frame, and order by district and party name
+election <- election_results[,c(2,3,7)]
+election_desc = election[order(election$district,election$party_name),]
+
+#select new found party in each district, and delete blank party name rows
+election_desc2 <- election_desc %>% 
+  group_by(district,party_name) %>%
+  slice(which.min(year)) %>% 
+  filter(party_name != "")
+
+#count number of new founded party each year by district
+party_founded <- election_desc2 %>% 
+  group_by(district, year) %>% 
+  mutate(n = n())
+```
+
+### A)
+```{r}
+q1_a <- merge(spi_final, party_founded, all = TRUE)
+#q1_a2 <- q1_a[,c(1,3,4)]
+
+#segment year to election period
+q1_a_group <- q1_a %>%
+  mutate(period = case_when(year <= 1951 ~ 1,
+                            year > 1951 & year <= 1957 ~ 2,
+                            year > 1957 & year <= 1962 ~ 3,
+                            year > 1962 & year <= 1967 ~ 4,
+                            year > 1967 & year <= 1971 ~ 5,
+                            year > 1971 & year <= 1977 ~ 6,
+                            year > 1977 & year <= 1980 ~ 7,
+                            year > 1980 & year <= 1984 ~ 8,
+                            year > 1984 & year <= 1985 ~ 9,
+                            year > 1985 & year <= 1989 ~ 10,
+                            year > 1989 & year <= 1991 ~ 11,
+                            year > 1991 & year <= 1996 ~ 12,
+                            year > 1996 & year <= 1998 ~ 13,
+                            year > 1998 & year <= 1999 ~ 14,
+                            TRUE ~ 0))
+
+q1_a_group <- q1_a_group %>%
+  mutate(num_years = case_when(period == 1 ~ 5,
+                               period == 2 ~ 6,
+                               period == 3 ~ 5,
+                               period == 4 ~ 5,
+                               period == 5 ~ 4,
+                               period == 6 ~ 6,
+                               period == 7 ~ 3,
+                               period == 8 ~ 4,
+                               period == 9 ~ 1,
+                               period == 10 ~ 4,
+                               period == 11 ~ 2,
+                               period == 12 ~ 5,
+                               period == 13 ~ 2,
+                               period == 14 ~ 1,
+                               TRUE ~ 0))
+
+q1_a_group[(q1_a_group$period==1),]$num_years <- NA
+
+#get mean spi by period in each district
+q1_a_group <- q1_a_group %>%
+  group_by(district,period) %>%
+  mutate(spi_mean=mean(spi))
+```
+
+```{r}
+#delete NA rows
+q1_a_final <- q1_a_group[,-4]
+q1_a_final <- q1_a_final[is.na(q1_a_group$n) == FALSE,]
+q1_a_final <- q1_a_final[is.na(q1_a_final$spi) == FALSE,]
+#q1_a_avg <- aggregate(x = q1_a["spi"], by = q1_a["district"], FUN = mean, na.rm = TRUE)
+#q1_a_avg$n <- aggregate(x = q1_a["n"], by = q1_a["district"], FUN = sum, na.rm = TRUE)[,2]
+
+#plot Number of Political Parties Founded vs. Average SPI
+ggplot(data=q1_a_final, aes(x=n, y=spi_mean, group=1), na.omit = TRUE) +
+  geom_point() +
+  labs(x = "Number of Political Parties Founded", y = "Average SPI")
+```
+
+### B)
+```{r}
+#rearrange and rename data frame
+q1_b_sqi <- q1_a_final[,c(1,5,7)]
+colnames(q1_b_sqi)[1] <- "focal_district"
+colnames(q1_b_sqi)[2] <- "period"
+colnames(q1_b_sqi)[3] <- "neighbor_spi"
+
+q1_b <- merge(q1_a_final, border_information, all = TRUE)
+
+#rearrange data frame
+q1_b_neighbor <- q1_b[,c(1,4,5,6,7,8)]
+
+q1_b_neighbor <-  merge(q1_b_neighbor, q1_b_sqi, all = TRUE)
+
+#calculate neighbor spi mean by period in each district
+q1_b_neighbor_mean <- q1_b_neighbor %>%
+  group_by(district,period) %>%
+  mutate(neighbor_spi_mean=mean(na.omit(neighbor_spi)))
+
+#rearrange data frame
+q1_b_neighbor_mean <- q1_b_neighbor_mean[,c(3,1,4,5,6,8)]
+q1_b_neighbor_mean <- unique(q1_b_neighbor_mean)
+
+#spi lagged value
+q1_b_lag <- q1_b_neighbor_mean %>%
+  arrange(district,period) %>%
+  group_by(district) %>%
+  mutate(lag = lag(spi_mean))
+
+#the lagged value of neighbors’ spi
+q1_b_lag <- q1_b_lag %>%
+  arrange(district,period) %>%
+  group_by(district) %>%
+  mutate(lag_neighbor = lag(neighbor_spi_mean))
+
+#delete NA value rows
+q1_b_lag <- q1_b_lag[is.na(q1_b_lag$spi_mean) == FALSE,]
+```
+
+```{r}
+library(plm)
+#plm(spi_mean ~ lag, q1_b_lag, effect = "twoways", model = "within", index = "district")
+#plm(neighbor_spi_mean ~ lag_neighbor, q1_b_lag, effect = "twoways", model = "within", index = "district")
+summary(plm(spi_mean ~ lag+lag_neighbor+num_years, q1_b_lag, effect = "twoways", model = "within", index = "district"))
+```
+
+From the result shown above, we can see that the SPI is not independent from one election period to the next within a district. They have a positive coefficient around 1, and the p value is less than 0.05, indicating that is statistically significant.
+
+### C)
+```{r}
+q1_c <- q1_a_group
+
+#assign drought and flood based on spi value
+q1_c <- q1_c %>%
+  arrange(district,period) %>%
+  mutate(climate = case_when(spi < -1 ~ 1,
+                             spi > 1 ~ 1,
+                             TRUE ~ 0))
+
+#count number of drought and flood event by period in each district
+q1_c_count <- q1_c %>%
+  group_by(district,period,climate) %>%
+  mutate(extreme_count = sum(climate == 1 ))
+
+#keep the max count
+q1_c_count <- q1_c_count %>%
+  group_by(district,period) %>%
+  mutate(extreme_count = max(extreme_count))
+
+#rearrange data frame and delete NA value rows
+q1_c_count <- q1_c_count[is.na(q1_c_count$n) == FALSE,]
+q1_c_count <- q1_c_count[,c(1,4,5,6,7,10)]
+```
+
+```{r}
+#rearrange and rename data frame
+q1_c_count2 <- unique(q1_c_count[,c(1,4,6)])
+colnames(q1_c_count2)[1] <- "focal_district"
+colnames(q1_c_count2)[2] <- "period"
+colnames(q1_c_count2)[3] <- "neighbor_extreme_count"
+
+#q1_c_count3 <- q1_c_count[,-2]
+q1_c_neighbor <- merge(q1_c_count, border_information, all = TRUE)
+q1_c_neighbor2 <- merge(q1_c_count2, q1_c_neighbor, all = TRUE)
+#rearrange the order of columns
+q1_c_neighbor2 <- q1_c_neighbor2[,c(4,5,6,2,7,8,1,3)]
+
+##calculate neighbor drought and flood events mean by period in each district
+q1_c_neighbor_mean2 <- q1_c_neighbor2 %>%
+  arrange(district,period) %>%
+  group_by(district,period) %>%
+  mutate(neighbor_extreme_mean=mean(na.omit(neighbor_extreme_count)))
+
+#rearrange data frame
+q1_c_neighbor_mean2 <- q1_c_neighbor_mean2[,c(1,2,3,4,5,6,9)]
+q1_c_neighbor_mean3 <- q1_c_neighbor_mean2[,-2]
+q1_c_neighbor_mean3 <- unique(q1_c_neighbor_mean3)
+
+#find lagged
+q1_c_lag <- q1_c_neighbor_mean3 %>%
+  #arrange(district,period) %>%
+  group_by(district) %>%
+  mutate(lag_extreme = shift(extreme_count))
+
+#lagged neighbor
+q1_c_lag <- q1_c_lag %>%
+  arrange(district,period) %>%
+  group_by(district) %>%
+  mutate(lag_extreme_neighbor = shift(neighbor_extreme_mean))
+
+#delete NA value rows
+q1_c_lag <- q1_c_lag[is.na(q1_c_lag$extreme_count) == FALSE,]
+```
+
+```{r}
+#see how many NAs
+na_count <-sapply(q1_c_lag, function(y) sum(length(which(is.na(y)))))
+data.frame(na_count)
+
+library(pglm)
+
+summary(pglm(extreme_count ~ lag_extreme + lag_extreme_neighbor + num_years, q1_c_lag, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Comparing the result in part c to part b, the coefficient is close to 0, so we can conclude that the number of moderate droughts or floods is independent from one election period to the next within a district, as well as from neighboring districts from one election period to the next.
+
+
+## Question 2
+### A)
+```{r}
+q2_a = q1_c_count
+summary(pglm(n ~ extreme_count + num_years, q2_a, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+```{r}
+q2_b_issue = unique(election_results[,c(7,8)])
+q2_b = unique(q1_c_neighbor_mean2)
+q2_b = merge(q2_b_issue,q2_b)
+
+#check all the types of party issue
+unique(q2_b$party_issue)
+#"liberal", "religious","economic_farming","far left","economic_nonfarming","far right","ethnic regional"
+```
+
+Liberal
+```{r}
+q2_b_libiral <- unique(q2_b[(q2_b$party_issue == "liberal"),c(3:8)])
+summary(pglm(n ~ extreme_count + num_years, q2_b_libiral, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Economic Farming
+```{r}
+q2_b_economic_farming <- unique(q2_b[(q2_b$party_issue == "economic_farming"),c(3:8)])
+summary(pglm(n ~ extreme_count + num_years, q2_b_economic_farming, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Far Left
+```{r}
+q2_b_far_left <- unique(q2_b[(q2_b$party_issue == "far left"),c(3:8)])
+summary(pglm(n ~ extreme_count + num_years, q2_b_far_left, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Economic Nonfarming
+```{r}
+q2_b_economic_nonfarming <- unique(q2_b[(q2_b$party_issue == "economic_nonfarming"),c(3:8)])
+summary(pglm(n ~ extreme_count + num_years, q2_b_economic_nonfarming, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Far Right
+```{r}
+q2_b_far_right <- unique(q2_b[(q2_b$party_issue == "far right"),c(3:8)])
+summary(pglm(n ~ extreme_count + num_years, q2_b_far_right, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Ethnic Regional
+```{r}
+q2_b_ethnic_regional <- unique(q2_b[(q2_b$party_issue == "ethnic regional"),c(3:8)])
+summary(pglm(n ~ extreme_count + num_years, q2_b_ethnic_regional, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Based on the seven regressions above, we can see that extreme weather has different effects on each political parties. By looking at the coefficients and p-value, Liberal and Far Left political parties are more likely to be formed when a district experiences extreme weather. Ethnic Regional political parties are also slightly more likely to be formed when a district experiences extreme weather. The rest of the kinds of political parties are independent from the extreme weather.
+
+### B)
+```{r}
+q2_b_b <- unique(q1_c_neighbor_mean3)
+
+#delete NA values rows
+q2_b_b <- q2_b_b[is.na(q2_b_b$extreme_count) == FALSE,]
+
+summary(pglm(n ~ extreme_count + neighbor_extreme_mean + num_years, q2_b_b, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+From the result shown above, we can see that the numbers of parties founded is independent from the number of years its neighboring districts experience years of droughts or flooding from  one election period to the next within a district. the coefficient is close to 0, and the p value is larger than 0.05, indicating that is not statistically significant.
+
+```{r}
+summary(pglm(n ~ extreme_count + neighbor_extreme_mean + num_years, q2_b_b, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+
+## Question 3
+```{r}
+#select the party name from data set
+q3 <- election_results[,c(2,3,7,10)]
+
+#segment year to election period
+q3 <- q3 %>%
+  mutate(period = case_when(year <= 1951 ~ 1,
+                            year > 1951 & year <= 1957 ~ 2,
+                            year > 1957 & year <= 1962 ~ 3,
+                            year > 1962 & year <= 1967 ~ 4,
+                            year > 1967 & year <= 1971 ~ 5,
+                            year > 1971 & year <= 1977 ~ 6,
+                            year > 1977 & year <= 1980 ~ 7,
+                            year > 1980 & year <= 1984 ~ 8,
+                            year > 1984 & year <= 1985 ~ 9,
+                            year > 1985 & year <= 1989 ~ 10,
+                            year > 1989 & year <= 1991 ~ 11,
+                            year > 1991 & year <= 1996 ~ 12,
+                            year > 1996 & year <= 1998 ~ 13,
+                            year > 1998 & year <= 1999 ~ 14,
+                            TRUE ~ 0))
+
+q3 <- q3 %>%
+  mutate(num_years = case_when(period == 1 ~ 5,
+                               period == 2 ~ 6,
+                               period == 3 ~ 5,
+                               period == 4 ~ 5,
+                               period == 5 ~ 4,
+                               period == 6 ~ 6,
+                               period == 7 ~ 3,
+                               period == 8 ~ 4,
+                               period == 9 ~ 1,
+                               period == 10 ~ 4,
+                               period == 11 ~ 2,
+                               period == 12 ~ 5,
+                               period == 13 ~ 2,
+                               period == 14 ~ 1,
+                               TRUE ~ 0))
+
+q3[(q3$period==1),]$num_years <- NA
+```
+
+
+```{r}
+#calculate the vote count of each party per election period
+q3_party_vote <- q3 %>%
+  arrange(district,period) %>%
+  group_by(district, party_name, period) %>%
+  mutate(party_vote_count = sum(vote_count))
+
+#calculate the vote count of each district per election period
+q3_party_vote <- q3_party_vote %>%
+  group_by(district, period) %>%
+  mutate(district_vote_count = sum(vote_count))
+
+#calculate the vote share
+q3_party_vote <- q3_party_vote %>%
+  mutate(vote_share = party_vote_count/district_vote_count)
+
+#rearrange table
+q3_vote_share <- q3_party_vote[,c(1,3,5,6,9)]
+q3_vote_share <- unique(q3_vote_share)
+```
+
+```{r}
+#check NA values
+na_count <-sapply(q3_vote_share, function(y) sum(length(which(is.na(y)))))
+data.frame(na_count)
+
+q3_vote_share <- q3_vote_share[is.na(q3_vote_share$vote_share) == FALSE,]
+
+library(hhi)
+
+#calculate hhi
+q3_hhi <- q3_vote_share %>%
+  group_by(district, period) %>%
+  mutate(hhi = sum(vote_share^2))
+
+#rearrange table
+q3_hhi <- q3_hhi[,c(1,3,4,6)]
+q3_hhi <- unique(q3_hhi)
+```
+
+```{r}
+#get the number of extreme events
+q3_count <- q1_c_count[,c(1,4,6)]
+
+#merge two tables
+q3_political <- merge(q3_count, q3_hhi, all = TRUE)
+
+summary(pglm(hhi ~ extreme_count + num_years, q3_political, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+From the result shown above, we can see that the the HHI’s concentration (fragmentation of
+political power) is independent from the extreme weather counts from one election period to the next within a district. The coefficient is close to 0, and the p value is larger than 0.05, indicating that is not statistically significant.
+
+
+## Question 4
+```{r}
+q4 <- election_desc2 %>% 
+  arrange(district,year)
+
+q4 <- q4 %>%
+  mutate(period = case_when(year <= 1951 ~ 1,
+                            year > 1951 & year <= 1957 ~ 2,
+                            year > 1957 & year <= 1962 ~ 3,
+                            year > 1962 & year <= 1967 ~ 4,
+                            year > 1967 & year <= 1971 ~ 5,
+                            year > 1971 & year <= 1977 ~ 6,
+                            year > 1977 & year <= 1980 ~ 7,
+                            year > 1980 & year <= 1984 ~ 8,
+                            year > 1984 & year <= 1985 ~ 9,
+                            year > 1985 & year <= 1989 ~ 10,
+                            year > 1989 & year <= 1991 ~ 11,
+                            year > 1991 & year <= 1996 ~ 12,
+                            year > 1996 & year <= 1998 ~ 13,
+                            year > 1998 & year <= 1999 ~ 14,
+                            TRUE ~ 0))
+
+q4 <- q4 %>%
+  mutate(num_years = case_when(period == 1 ~ 5,
+                               period == 2 ~ 6,
+                               period == 3 ~ 5,
+                               period == 4 ~ 5,
+                               period == 5 ~ 4,
+                               period == 6 ~ 6,
+                               period == 7 ~ 3,
+                               period == 8 ~ 4,
+                               period == 9 ~ 1,
+                               period == 10 ~ 4,
+                               period == 11 ~ 2,
+                               period == 12 ~ 5,
+                               period == 13 ~ 2,
+                               period == 14 ~ 1,
+                               TRUE ~ 0))
+
+q4[(q4$period==1),]$num_years <- NA
+```
+
+```{r}
+q4_neighbor <- border_information
+q4_focal <- q4[,c(1,3,4)]
+colnames(q4_focal)[1] <- "focal_district"
+colnames(q4_focal)[2] <- "focal_party_name"
+colnames(q4_focal)[3] <- "focal_period"
+
+#neighbor district merge
+q4_merge <- merge(q4, q4_neighbor, allow.cartesian=TRUE)
+q4_merge <- merge(q4_merge, q4_focal, allow.cartesian=TRUE)
+
+#rearrange table
+q4_merge <- q4_merge[,c(2,5,6,4,1,8,7)]
+
+#select neighboring district in any previous election period
+q4_merge2 <- q4_merge[((q4_merge$period > q4_merge$focal_period) & 
+                         (q4_merge$party_name == q4_merge$focal_party_name)),]
+
+#rearrange table
+q4_merge_final <- q4_merge2[,c(1,2,4)]
+
+#label all parties that have contested an election in a neighboring district in any previous election period with 1
+q4_merge_final <- q4_merge_final %>%
+  arrange(district, period) %>%
+  mutate(yes_previous = 1)
+
+#rearrange table
+q4_merge_final = unique(q4_merge_final)
+
+q4_final <- merge(q4, q4_merge_final, all = TRUE)
+
+#label all parties that have not contested an election in a neighboring district in any previous election period with 0
+q4_final[is.na(q4_final$yes_previous),]$yes_previous <- 0
+q4_final = q4_final[order(q4_final$district,q4_final$period),]
+```
+
+```{r}
+#merge the number of years of droughts or flooding with previous table
+q4_count <- q1_c_lag[,c(1,3,5,8)]
+q4_count <- merge(q4_final, q4_count, all = TRUE)
+q4_count[(is.nan(q4_count$lag_extreme_neighbor)),]$lag_extreme_neighbor <- NA
+```
+
+
+```{r}
+q4_count_yes <- q4_count %>%
+  arrange(district, period) %>%
+  group_by(district, period) %>%
+  mutate(n = n())
+
+q4_count_yes <- q4_count_yes[,c(1,2,5,6,7,8,9)]
+q4_count_yes <- unique(q4_count_yes)
+```
+
+```{r}
+summary(pglm(yes_previous ~ extreme_count + lag_extreme_neighbor + num_years, q4_count, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+```{r}
+q4_count_no <- q4_count
+q4_count_no[(q4_count_no$yes_previous == 1),]$yes_previous <- NA
+```
+
+
+```{r}
+q4_yes_previous <- q4_count[(q4_count$yes_previous == 1),]
+
+q4_yes_previous <- q4_yes_previous %>%
+  arrange(district, period) %>%
+  group_by(district, period) %>%
+  mutate(n = n())
+
+q4_yes_previous <- q4_yes_previous[,c(1,2,5,7,8,9)]
+q4_yes_previous <- unique(q4_yes_previous)
+
+q4_no_previous <- q4_count[(q4_count$yes_previous == 0),]
+
+q4_no_previous <- q4_no_previous %>%
+  arrange(district, period) %>%
+  group_by(district, period) %>%
+  mutate(n = n())
+
+q4_no_previous <- q4_no_previous[,c(1,2,5,7,8,9)]
+q4_no_previous <- unique(q4_no_previous)
+```
+
+```{r}
+summary(pglm(n ~ extreme_count + lag_extreme_neighbor + num_years, q4_yes_previous, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+```{r}
+summary(pglm(n ~ extreme_count + lag_extreme_neighbor + num_years, q4_no_previous, effect = "twoways", model = "within",  index = "district", family = "poisson"))
+```
+
+Based on the two regressions above, we can see that whether the new parties that appear in a district
+are the same parties that have appeared in neighboring districts in the past has different effects on number of parties founded. By looking at the coefficients and p-value, new political parties being founded in a district that have not contested an election in a neighboring district in any previous election period are more dependent to the extreme weather counts and lagged neighbor extreme weather counts. On the contrast, new political parties being founded in a district, that have contested an election in a neighboring district in any previous election period are independent to the extreme weather.
+
+
+
+
+
+
+
+
+
+
+new founded parties in a district that have not contested an election in a neighboring district in any previous election period.
+```{r}
+library(data.table)
+
+q4_neighbor <- border_information
+q4_neighbor <- getanID(data = q4_neighbor, id.vars = "focal_district")
+q4_neighbor <- dcast(setDT(q4_neighbor), focal_district ~ .id, value.var = c("district"))
+
+q4 <- q4[,c(1,4,3)]
+#q4_period <- dcast(setDT(q4), district ~ period, value.var = c("party_name"))
+```
+
+```{r}
+unique_district_list <- q4_neighbor[,c(1)]
+
+q4[(q4$district == "Adilabad"),]
+test = as.list(q4_neighbor[(q4_neighbor$focal_district == "Adilabad"),])$district
+#q4[(q4$district == test),]
+
+q4[q4$district == "Adilabad" & q4$period < 3, ]$party_name
+
+for (district_name in unique_district_list) {
+  df1 = q4[(q4$district == district_name),]
+  party_name = as.list(df1)$district
+  neighbor = as.list(q4_neighbor[(q4_neighbor$focal_district == district_name),])$district
+  
+  for (i in 2:14) {
+    district_party_name = as.list[(df1$period == i),]$party_name
+    
+    for(neighbor_name in neighbor) {
+      neighbor_party = list()
+      temp_neighbor_name = q4[q4$district == neighbor_name & q4$period < i, ]$party_name
+      neighbor_party += temp_neighbor_name
+    }
+  }
+  
+}
+```
+
+```{r}
+q4 <- q3[,c(1,3,5,6)]
+q4_neighbor <- border_information
+
+#neighbor district merge
+merge(q4,border_information,allow.cartesian=TRUE)
+```
+
+new founded parties in a district, that have contested an election in a neighboring district
+in any previous election period.

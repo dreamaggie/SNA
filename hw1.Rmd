@@ -1,0 +1,213 @@
+---
+title: "Social Network hw1"
+author: "Maggie Meng"
+date: "2021/10/25"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(igraph)
+library(data.table)
+library(reshape2)
+data = fread("social_and_task_network.csv", header = TRUE)
+```
+
+```{r}
+#Separate social and task network 
+social <- subset(data, social_tie != 0, select = c("ego","alter","social_tie"))
+social <- subset(social, ego != 12 & alter != 12, select = c("ego","alter","social_tie"))
+social$count <- 1
+task <- subset(data, task_tie != 0, select = c("ego","alter","task_tie"))
+task <- subset(task, ego != 13 & alter != 13 & ego != 14 & alter != 14, select = c("ego","alter","task_tie"))
+task$count <- 1
+```
+
+```{r}
+#Covert them to matrix
+social_network_matrix <- dcast(social, ego ~ alter, value.var = 'count')
+social_network_matrix = social_network_matrix[,-1]
+task_network_matrix <- dcast(task, ego ~ alter, value.var = 'count')
+task_network_matrix = task_network_matrix[,-1]
+```
+
+```{r}
+social_network_matrix[is.na(social_network_matrix)] = 0
+social_network = graph.adjacency(as.matrix(social_network_matrix), "directed", weighted = TRUE)
+task_network_matrix[is.na(task_network_matrix)] = 0
+task_network = graph.adjacency(as.matrix(task_network_matrix), "directed", weighted = TRUE)
+```
+
+
+## Question 1 
+### A)
+```{r}
+social_indegree = degree(social_network, mode = "in")
+social_outdegree = degree(social_network, mode="out")
+social_closeness = closeness(social_network)
+social_betweenness = betweenness(social_network)
+social_pagerank = page_rank(social_network)$vector
+
+task_indegree = degree(task_network, mode = "in")
+task_outdegree = degree(task_network, mode="out")
+task_closeness = closeness(task_network)
+task_betweenness = betweenness(task_network)
+task_pagerank = page_rank(task_network)$vector
+```
+
+```{r}
+df.social = data.frame(social_indegree,social_outdegree,social_closeness,social_betweenness,social_pagerank)
+df.task = data.frame(task_indegree,task_outdegree,task_closeness,task_betweenness,task_pagerank)
+```
+
+### B)
+```{r}
+cor(df.social,df.task)
+```
+
+Betweenness measures in the task network are most closely related to those in the social network with a correlation of 0.932. 
+Since betweenness centrality measures the number of times a node lies on the shortest path between other nodes, the high correlation of betweenness between social and task network indicates that the nodes perform as almost the same 'bridges' between nodes in both network.
+
+
+## Question 2 
+### A)
+```{r}
+#cut-off points
+social_mean_strength = sum(data$social_tie)/length(which(data$social_tie != 0))
+task_mean_strength = sum(data$task_tie)/length(which(data$task_tie != 0))
+
+data2 = fread("social_and_task_network.csv", header = TRUE)
+
+#make all strong ties as 2, all weak ties as 1
+data2$social_tie[data2$social_tie !=0 & data2$social_tie <= social_mean_strength] <- 1
+data2$social_tie[data2$social_tie > social_mean_strength] <- 2
+
+data2$task_tie[(data2$task_tie !=0) & (data2$task_tie <= task_mean_strength)] <- 1
+data2$task_tie[data2$task_tie > task_mean_strength] <- 2
+
+data2[, final_tie:=pmax(social_tie, task_tie)]
+
+social_task_network_matrix <- dcast(data2, ego ~ alter, value.var = 'final_tie')
+social_task_network_matrix = social_task_network_matrix[,-1]
+
+social_task_network = graph.adjacency(as.matrix(social_task_network_matrix), "directed", weighted = TRUE)
+```
+
+```{r}
+ranges_social_task = E(social_task_network)$weight
+#Strong tie is red and weak tie is blue
+ranges_social_task[ranges_social_task == 1] = "dark blue"
+ranges_social_task[ranges_social_task == 2] = "red"
+plot.igraph(social_task_network,layout=layout.fruchterman.reingold, 
+            vertex.label.color="black",edge.color=ranges_social_task,
+            vertex.size = 13, edge.arrow.size=.3,edge.curved=FALSE, main="Tie: Task & Social")
+```
+As we can see in the plot above, the network does not satisfy Strong Triadic Closure.
+For example, there are strong ties between 22 & 21 and 22 & 1, however, there is no tie between 21 & 1, which violates the Strong Triadic Closure.
+
+### B)
+```{r}
+strong_tie_matrix = social_task_network_matrix
+#make all weak ties to 0
+strong_tie_matrix[strong_tie_matrix== 1] <- 0
+
+strong_tie = graph.adjacency(as.matrix(strong_tie_matrix), "directed", weighted = TRUE)
+plot.igraph(strong_tie,layout=layout.fruchterman.reingold, 
+            vertex.label.color="black",
+            vertex.size = 13, edge.arrow.size=.3,edge.curved=FALSE, main="Strong Ties")
+```
+
+```{r}
+#find all strong ties with distance of 2
+strong_tie = distances(strong_tie, weights=NA)
+strong_tie[strong_tie != 2] <- NA
+#add two matrices to see if there's ties exist between two strong tie 
+strong_tie2 = strong_tie + social_task_network_matrix
+strong_tie2
+
+(sum(strong_tie2[,]==2, na.rm = TRUE)-1)/2
+```
+In my strong_tie2 matrix, 3 means there is at least a weak tie between two strong ties, 2 means there is no tie between two strong ties.
+Regardless of the direction, there are 17 2's, which means there are 17 ties that are in violation of Strong Triadic Closure.
+
+
+## Question 3 
+### A)
+```{r}
+edge_betweenness(social_task_network,e = E(social_task_network), directed = TRUE, weights = NULL)
+social_task_network
+```
+
+### B)
+The edge betweenness are (roughly) defined by the number of geodesics (shortest paths) going through an edge.
+It seems like edges with high betweenness can be both strong and weak ties, there is no clear tendency.
+
+
+## Question 4 
+```{r}
+#Do not need node 3 cause it does not have relationship with any node
+q4_matrix = social_task_network_matrix[-3,-3]
+q4_matrix[q4_matrix== 2] <- 1
+q4_matrix = data.matrix(q4_matrix)
+```
+
+```{r}
+library(expm)
+
+final_matrix = q4_matrix
+final_matrix[final_matrix > 0] <- 1
+
+#Sum the matrix from power of 1 to power of 21
+for (i in 2:21) {
+  final2_matrix = final_matrix %^% i
+  final2_matrix[final2_matrix > 0] <- 1
+  final_matrix = final_matrix + final2_matrix
+}
+
+final_matrix
+
+#0 means nodes that do not have walks between one another
+sum(final_matrix[,]==0, na.rm = TRUE)/2
+```
+By calculating the for loop above, I get 38 pairs of nodes do not have walks between one another.
+
+```{r}
+q4 = graph.adjacency(as.matrix(q4_matrix), "directed", weighted = TRUE)
+q4_distance = distances(q4, weights=NA)
+q4_distance
+
+sum(q4_distance[,]==Inf, na.rm = TRUE)/2
+```
+Using distance function, I also got 38 pairs of nodes do not have walks between one another, which is same as using for loop.
+
+
+## Question 5
+```{r}
+degree_centrality_1 <-  rbind(c(0,1,1,1,1),c(1,0,0,0,0),c(1,0,0,0,0),c(1,0,0,0,0),c(1,0,0,0,0))
+degree_centrality_1 = graph.adjacency(as.matrix(degree_centrality_1), "directed", weighted = TRUE)
+plot.igraph(degree_centrality_1,layout=layout.fruchterman.reingold, 
+            vertex.label.color="black", vertex.label=NA,
+            edge.arrow.size=.3,edge.curved=FALSE, main="Degree Centrality = 1")
+closeness(degree_centrality_1)
+betweenness(degree_centrality_1)
+```
+
+```{r}
+degree_centrality_0 <- t(matrix(1, 5, 5))
+diag(degree_centrality_0) <- 0
+degree_centrality_0 = graph.adjacency(as.matrix(degree_centrality_0), "directed", weighted = TRUE)
+plot.igraph(degree_centrality_0,layout=layout.fruchterman.reingold, 
+            vertex.label.color="black", vertex.label=NA,
+            edge.arrow.size=.3,edge.curved=FALSE, main="Degree Centrality = 0")
+closeness(degree_centrality_0)
+betweenness(degree_centrality_0)
+```
+For other measures of centrality, such as closeness or betweenness, the relationship does not hold true for all of them.
+When degree centrality equals to 1, the closeness centrality and betweenness centrality do not equal to 1.
+When degree centrality equals to 0, the closeness centrality does not equal to 0, but the betweenness centrality equals to 0.
+
